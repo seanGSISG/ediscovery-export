@@ -1,0 +1,63 @@
+{
+  "$comment": "Copy this file, fill it in, and pass it to Invoke-EDiscoveryExport.ps1 -ConfigFile. Values below mirror the proven 'outage request' pull.",
+
+  "case": {
+    "name": "6344 - GPA-2526 Claim - Outage Request Search",
+    "description": "Keyword pull: outage request, Mar-Oct 2022, GSI + Environet mailboxes."
+  },
+
+  "search": {
+    "name": "Outage Request Search",
+    "keywords": ["outage request"],
+    "startDate": "2022-03-01",
+    "endDate": "2022-10-31",
+    "contentQuery": null,
+    "$comment": "Each keyword element becomes an OR'd KQL group, e.g. ['outage request'] -> (outage request). Set contentQuery to raw KQL to override keywords+dates entirely."
+  },
+
+  "mailboxes": [
+    "aderosa@gsisg.com", "aderosa@environetinc.com",
+    "bstewart@gsisg.com", "bstewart@environetinc.com",
+    "cdouse@gsisg.com", "cdouse@environetinc.com",
+    "cjack@gsisg.com", "cjack@environetinc.com",
+    "dgeuea@gsisg.com", "dgeuea@environetinc.com",
+    "dhackney@gsisg.com", "dhackney@environetinc.com",
+    "dhiga@gsisg.com", "dhiga@environetinc.com",
+    "jodom@gsisg.com", "jodom@environetinc.com",
+    "jfolkestad@gsisg.com", "jfolkestad@environetinc.com",
+    "kstewart@gsisg.com", "kstewart@environetinc.com",
+    "lzukosky@gsisg.com", "lzukosky@environetinc.com",
+    "mvalenciano@gsisg.com", "mvalenciano@environetinc.com",
+    "mtrousdale@gsisg.com", "mtrousdale@environetinc.com",
+    "pbusic@gsisg.com", "pbusic@environetinc.com",
+    "svandusen@gsisg.com", "svandusen@environetinc.com",
+    "smattson@gsisg.com", "smattson@environetinc.com"
+  ],
+
+  "members": ["xsswanson@gsisg.com"],
+
+  "export": {
+    "format": "pst",
+    "singlePst": true,
+    "criteria": "searchHits",
+    "location": "responsiveLocations",
+    "includeReport": true,
+    "includePartiallyIndexed": false,
+    "$comment": "singlePst:false adds 'splitSource' for one PST per mailbox. format: pst or msg."
+  },
+
+  "output": {
+    "dir": "exports/6344-outage-request"
+  },
+
+  "auth": {
+    "mode": "app-only",
+    "appId": "d01d8358-aa33-4f54-a193-5cd1d360ef14",
+    "tenantId": "07e978d3-49bb-4f6c-948d-2908f2e20014",
+    "certThumbprint": "0B5D10D22CEFCBC98E0737278DB4C40E22852AB6",
+    "certPath": null,
+    "certPasswordEnv": null,
+    "downloadResourceAppId": "b26e684c-5068-4120-a679-64a5d2c909d9",
+    "$comment": "mode: app-only | interactive. certThumbprint resolves from CurrentUser/LocalMachine store; or set certPath to a .pfx (+ certPasswordEnv naming an env var holding its password). downloadResourceAppId is the first-party Purview eDiscovery download resource; leave as-is."
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "gsi-ediscovery",
+  "owner": {
+    "name": "GSI IT Infrastructure"
+  },
+  "metadata": {
+    "description": "Local marketplace hosting the ediscovery-export plugin."
+  },
+  "plugins": [
+    {
+      "name": "ediscovery-export",
+      "source": "./",
+      "description": "Purview eDiscovery keyword search + PST/MSG export (Graph API, app-only) with a natural-language skill front door."
+    }
+  ]
+}

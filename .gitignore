@@ -1,0 +1,21 @@
+# Export output (can be many GB) and run manifests
+exports/
+*.pst
+*.zip
+
+# Real run configs (keep only the *.example.json)
+config/*.json
+!config/*.example.json
+
+# Certificates / secrets
+*.pfx
+*.pem
+*.key
+.env
+
+# OS / editor cruft
+Thumbs.db
+desktop.ini
+.DS_Store
+.vs/
+.idea/
