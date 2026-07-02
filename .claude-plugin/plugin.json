@@ -5,6 +5,5 @@
   "author": {
     "name": "GSI IT Infrastructure"
   },
-  "keywords": ["ediscovery", "purview", "microsoft365", "graph", "compliance", "export", "pst", "powershell"],
-  "skills": ["./skills/ediscovery-export"]
+  "keywords": ["ediscovery", "purview", "microsoft365", "graph", "compliance", "export", "pst", "powershell"]
 }

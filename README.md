@@ -44,6 +44,19 @@ ediscovery-export/
 - Any UPN you list under `members` must already be in the **eDiscovery Manager role
   group** to see the case in the portal.
 
+## Authentication (no `.env`, no secret)
+
+Certificate-based **app-only** auth, configured entirely in the config JSON's `auth` block
+(`appId`, `tenantId`, `certThumbprint` — or a `.pfx` via `certPath` + optional
+`certPasswordEnv`). The engine runs `Connect-MgGraph -Certificate` and mints the separate
+Purview download token from the **same cert's private key** — there is no client secret and
+no `.env` file. The plugin/skill does not authenticate; the PowerShell **engine** does, from
+the config you hand it.
+
+New machine checklist: the cert installed (store or `.pfx`), `Microsoft.Graph.Authentication`
+module, and the app registration (`eDiscovery.ReadWrite.All` + eDiscovery Manager + download
+resource). On the original GSI workstation this is already in place.
+
 ## Usage (standalone)
 
 1. Copy the example config and fill it in:
