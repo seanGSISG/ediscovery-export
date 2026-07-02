@@ -41,6 +41,10 @@ tenant-wide compliance searches.
   case in the portal (adding a case member does not grant the role).
 - PowerShell 7+ and `Microsoft.Graph.Authentication`.
 
+**Full setup for a new machine / new tenant** (app registration, certificate, role,
+module) is in `docs/authentication-setup.md`. There is no `.env` — auth is entirely the
+config `auth` block.
+
 ## Step 1 — Intake and build the config
 
 Collect: **keywords**, the **mailbox list** (SMTP; expand both domains if applicable), the
@@ -101,10 +105,10 @@ pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Invoke-EDiscoveryExport.ps1" \
 - When `succeeded`, `-Resume` downloads the PST + report to `output.dir`, verifies the
   Summary item count, writes the run manifest, and marks the state done.
 
-To automate the polling in Claude Code, set up a recurring check with the `/loop` skill
-(e.g. `/loop 15m` running the `-Resume` command) or a scheduled routine, and stop it once
-the run manifest / downloaded files appear. Outside Claude Code, a Windows Scheduled Task
-running the `-Resume` command every 15 min is the equivalent (see `docs/runbook.md`).
+**Preferred: automate the poll with the Claude Code `/loop` skill** — e.g. run
+`/loop 15m` executing the `-Resume` command, and stop the loop once the run manifest /
+downloaded files appear. Outside Claude Code, a Windows Scheduled Task running the
+`-Resume` command every 15 min is the equivalent (see `docs/runbook.md`).
 
 When files land, report: `exportStatus`, each file name + size, `verifiedItemCount`, the
 output directory, and the portal URL. Download URLs are valid 14 days.

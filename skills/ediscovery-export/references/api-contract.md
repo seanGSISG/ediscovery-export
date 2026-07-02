@@ -22,7 +22,7 @@ To reuse, first `GET .../ediscoveryCases?$filter=displayName eq '<name>'`.
 ## 2. Add case member (portal visibility) — APP-ONLY SUPPORTED
 ```
 POST /security/cases/ediscoveryCases/{caseId}/caseMembers
-{ "recipientType": "user", "smtpAddress": "xsswanson@gsisg.com" }
+{ "recipientType": "user", "smtpAddress": "admin@example.com" }
 ```
 Bare body — do **not** send an `@odata.type` (it 400s "Invalid JSON format").
 `recipientType` = `user` or `roleGroup`. The user must already be in the **eDiscovery
