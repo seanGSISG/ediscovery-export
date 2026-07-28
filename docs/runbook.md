@@ -88,6 +88,32 @@ pull packages from **Purview portal -> eDiscovery -> Cases -> `<case>` -> Export
 - Delete test/throwaway cases from the portal (or `DELETE
   /v1.0/security/cases/ediscoveryCases/{caseId}`) when done.
 
+## Footguns
+
+- **One `output.dir` per export — always.** `export-state.json` is written *into*
+  `output.dir` under a fixed name, and the downloaded packages land there too. Firing a
+  second export while another is still in flight, against the same `output.dir`, silently
+  overwrites the first one's resume state: the operation is still running in Purview, but
+  the local pointer to it is gone and `-Resume` now polls the newer export. Give every
+  export its own directory (`output/<case>-<date>/`). `export-state.done.json` is the same
+  fixed name, so a shared directory also clobbers completed-run state.
+- **`-Resume` is a no-op while the export is running.** It prints the operation status and
+  exits without downloading — that is the expected output for the first several polls, not
+  a failure. Only when the operation reaches `succeeded`/`partiallySucceeded` does it
+  download the packages, verify the `Summary.csv` item count, write `run-manifest-*.json`,
+  and rename the state to `export-state.done.json`. Treat the run as finished when the
+  manifest and the `.done.json` exist, not when `-Resume` stops erroring.
+- **Download URLs expire after 14 days.** The `downloadUrl` values captured in
+  `export-state.json` are single-user and time-limited. If you lose the local state, or
+  come back after the window, do not try to reconstruct the URLs — re-open the export from
+  **Purview portal -> eDiscovery -> Cases -> `<case>` -> Exports** and download from
+  there, or re-run the export to mint fresh links.
+- **App-only auth only sees cases it created.** Even with `eDiscovery.ReadWrite.All`, the
+  app cannot enumerate, estimate, or export a case that was created in the portal or by a
+  different app registration — it is not a member of it. Every case this tool touches must
+  be one it created itself. If you need portal-created work, redo it as a tool-created
+  case; adding `members` gives humans portal visibility into that case, not the reverse.
+
 ## Rollback / cleanup
 
 Deleting the case removes its searches, data sources, and export operations. Downloaded

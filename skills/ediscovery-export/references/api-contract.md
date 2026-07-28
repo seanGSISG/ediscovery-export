@@ -49,6 +49,69 @@ The scope binds every noncustodial source added in step 3 and satisfies the
 pass sources inline — both 400. (To bind specific sources instead of the whole scope,
 use `custodianSources@odata.bind` / `noncustodialSources@odata.bind` with source URLs.)
 
+### 4a. `contentQuery` KQL reference (mailbox search)
+
+`contentQuery` is Purview KeyQL. `Build-ContentQuery` assembles it from
+`search.keywords` (each element becomes one parenthesised OR'd group) plus
+`search.startDate`/`endDate`, or passes `search.contentQuery` through verbatim.
+
+eDiscovery supports **only** the mailbox properties below. Other Exchange message
+properties are rejected or silently ignored — notably there is **no `body:`
+restriction**: body text is only reachable through bare keywords, which search the
+subject, the body, and the participant properties together. Message headers are not
+indexed and cannot be searched at all.
+
+| Property | Matches | Example |
+|----------|---------|---------|
+| `participants` | Every people field — From, To, Cc, **and** Bcc. Accepts a bare domain. | `participants:jsmith@example.com`<br>`participants:example.com` |
+| `recipients` | Recipient fields only — To, Cc, Bcc (**not** From). | `recipients:example.com` |
+| `to` | The To field. | `to:"Jamie Rivera"` |
+| `from` | The sender. | `from:jsmith@example.com` |
+| `cc` | The Cc field. | `cc:jsmith@example.com` |
+| `bcc` | The Bcc field. Only reliable when the sender's own mailbox is in scope. | `bcc:jsmith@example.com` |
+| `subject` | Text **anywhere in** the subject line — substring, never an exact match. `subject:"Q1 Budget"` also hits "Q1 Budget Draft". | `subject:"Q1 Budget"` |
+| `hasattachment` | `true` / `false`. | `from:jsmith@example.com AND hasattachment:true` |
+| `attachmentnames` | Attached file names. Wildcards allowed. | `attachmentnames:invoice.pdf`<br>`attachmentnames:invoice*` |
+| `kind` | Item type. Values: `contacts`, `docs`, `email`, `externaldata`, `faxes`, `im`, `journals`, `meetings`, `microsoftteams`, `notes`, `posts`, `rssfeeds`, `tasks`, `voicemail`. | `kind:email`<br>`kind:email OR kind:microsoftteams` |
+| `sent` | Date the message was **sent**. Date-comparison operators apply. | `sent>=2026-01-01 AND sent<=2026-03-31` |
+| `received` | Date the message was **received**. Date-comparison operators apply. | `received:2026-04-15` |
+| `size` | Item size in bytes. Supports `>`, `<`, and the `..` range form. | `size>26214400`<br>`size:1..1048576` |
+| `importance` | `high` / `medium` / `low`. | `importance:high` |
+| `isread` | `true` / `false`. | `isread:false` |
+| `category` | Outlook colour category. | `category:"Red Category"` |
+| `itemclass` | Third-party data imported into mailboxes. | `itemclass:ipm.externaldata.Twitter*` |
+| `sensitivetype` | Name of a sensitive information type. Never matches partially indexed items. | `sensitivetype:"Credit Card Number"` |
+
+**Syntax notes**
+
+- **Quoting.** Use straight double quotes for any multi-word value. `subject:budget Q1`
+  binds only `budget` to the subject and free-text-searches `Q1`; `subject:"budget Q1"`
+  is the phrase. Quotes also suppress wildcards and operators inside them. Smart/curly
+  quotes are an error — type queries, don't paste them out of Word.
+- **Bare terms are OR'd.** A space between two keywords, or between two `property:value`
+  expressions, means **OR** in Purview eDiscovery — `from:"Jamie Rivera" subject:merger`
+  returns messages from Jamie *or* messages about the merger. This is why each
+  `search.keywords` element is wrapped in its own `( ... )` group. Do not mix bare spaces
+  and explicit `OR` in one query; pick one. Boolean operators must be **UPPERCASE**.
+- **No space after the colon.** `to: jsmith` searches `jsmith` as a free-text keyword
+  rather than restricting the To field. Write `to:jsmith`.
+- **Dates.** Use `yyyy-MM-dd` with a comparison operator and no space:
+  `received>=2026-01-01 AND received<=2026-03-31`. A bare colon means that exact day
+  (`received:2026-04-15`). Cover **both** `sent` and `received` — which one is populated
+  depends on whether the item is in the sender's or the recipient's mailbox, which is why
+  the builder emits `(received>=.. AND received<=..) OR (sent>=.. AND sent<=..)`.
+- **Wildcards.** Trailing asterisk only (`invoice*`). Leading (`*invoice`), embedded
+  (`in*ce`), and enclosing (`*invoice*`) wildcards are unsupported.
+- **Negation.** Prefix with `-` or `NOT`: `-from:"Jamie Rivera"`.
+- **Empty properties are unsearchable.** `subject:""` returns zero results; there is no
+  way to query "field is blank".
+- **Recipient expansion.** Any recipient property (`from`, `to`, `cc`, `bcc`,
+  `participants`, `recipients`) is expanded via Entra ID to the user's SMTP/UPN, alias,
+  display name, and LegacyExchangeDN — so `participants:jsmith@example.com` quietly
+  becomes an OR of all four. It does **not** work for users whose Entra object was
+  deleted; list their old addresses manually. To suppress expansion, truncate the domain
+  and add a trailing wildcard inside quotes: `participants:"jsmith@exampl*"`.
+
 ## 5. Estimate statistics (scope gate)
 ```
 POST /security/cases/ediscoveryCases/{caseId}/searches/{searchId}/estimateStatistics

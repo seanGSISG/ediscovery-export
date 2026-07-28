@@ -13,9 +13,13 @@
         1. Connect Microsoft Graph (app-only cert, or -Interactive).
         2. Get-or-create the eDiscovery case.
         3. Add case members (so the case is visible in the Purview portal).
-        4. Get-or-create the search with the built KQL contentQuery.
-        5. Add each mailbox as a search DATA SOURCE (additionalSources by email) --
-           this is the correct model for user AND shared mailboxes. NOT custodians.
+        4. Add each mailbox to the CASE as a noncustodial data source -- this is the
+           correct model for user AND shared mailboxes. NOT custodians (they bind
+           nothing for shared mailboxes, so the estimate silently returns 0), and
+           NOT inline additionalSources on the search (ignored on create).
+        5. Get-or-create the search with the built KQL contentQuery, scoped via
+           dataSourceScopes = allCaseNoncustodialDataSources. The case data sources
+           must already exist: a search cannot be created without at least one.
         6. Estimate statistics and GATE on a non-zero result.
         7. Export the hits, poll the operation to completion.
         8. Download the result package(s) using the separate Purview eDiscovery

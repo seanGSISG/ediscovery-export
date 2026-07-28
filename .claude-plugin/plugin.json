@@ -1,6 +1,6 @@
 {
   "name": "ediscovery-export",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Run a Microsoft Purview eDiscovery keyword search across mailboxes and export the hits to PST/MSG, app-only and unattended, via the unified Graph API. Includes a natural-language skill front door.",
   "author": {
     "name": "GSI IT Infrastructure"

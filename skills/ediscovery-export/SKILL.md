@@ -47,16 +47,81 @@ config `auth` block.
 
 ## Step 1 — Intake and build the config
 
-Collect: **keywords**, the **mailbox list** (SMTP; expand both domains if applicable), the
-**date range**, **export format** (PST default; single combined vs per-mailbox), and who
-should **see the case** in the portal. Then write a config JSON (copy
-`config/ediscovery-export.example.json` to a working path). Rules:
+Collect: **keywords**, the **mailbox list** (SMTP; expand every domain the person holds),
+the **date range**, **export format** (PST default; single combined vs per-mailbox), and
+who should **see the case** in the portal.
+
+### Resolve identities to SMTP addresses
+
+Tickets arrive with **names**, not addresses. Resolve every participant against the tenant
+before writing the config — never guess an address or a domain.
+
+1. **Enumerate the tenant's verified domains.** A tenant usually holds several, and one
+   person is often addressable in more than one.
+
+   ```
+   GET /v1.0/domains?$select=id,isVerified,isDefault
+   ```
+
+2. **Resolve each name to a user.** `$search` requires the eventual-consistency header:
+
+   ```
+   GET /v1.0/users?$search="displayName:Jane Doe"&$select=displayName,userPrincipalName,mail,proxyAddresses
+   ConsistencyLevel: eventual
+   ```
+
+3. **Expand the person across every domain they hold.** Read `proxyAddresses` on the
+   matched user — someone at `jane.doe@example.com` may also receive at
+   `jdoe@example.net`. Put **all** of their addresses in `mailboxes`, and in any
+   participant clause in the query. A clause naming one address silently misses mail that
+   arrived at the others.
+
+4. **Check for a duplicate as an external contact.** The same human can exist as both an
+   internal account and an external mail contact / guest. A `participants:` filter may
+   need **both** forms to match every thread.
+
+Confirm the resolved address list back to the user before estimating.
+
+### Write the config
+
+Copy `config/ediscovery-export.example.json` to a working path. Rules:
 
 - `search.keywords`: each element is an OR'd KQL group. `["outage request"]` -> `(outage request)`.
   Exact phrase = quote it, or set `search.contentQuery` to raw KQL (overrides keywords + dates).
 - `mailboxes`: dedupe; include shared mailboxes freely.
 - `members`: default to the requesting admin's cloud UPN.
 - `export.singlePst`: `true` = one combined PST; `false` = one PST per mailbox.
+
+### WARNING — `search.contentQuery` replaces the whole query, dates included
+
+`Build-ContentQuery` returns a supplied `contentQuery` **immediately**, before any date
+logic runs. Only the keywords + `startDate` + `endDate` path builds both halves of the
+date window:
+
+```
+(received>=<start> AND received<=<end>) OR (sent>=<start> AND sent<=<end>)
+```
+
+A raw `contentQuery` silently discards the `sent` half. An operator who writes only a
+`received>=` clause **loses Sent Items** — which is exactly where a "sent to X" message
+lives. Nothing errors and nothing warns; the estimate just comes back smaller. That is
+silent under-collection, the worst failure mode in a legal search: over-collection is
+reviewable, under-collection is invisible.
+
+Prefer `keywords` + `startDate` + `endDate` and let the engine build the window. If you
+must use raw KQL, carry both halves yourself:
+
+```json
+"contentQuery": "(\"widget recall\") AND ((received>=2026-01-01 AND received<=2026-01-31) OR (sent>=2026-01-01 AND sent<=2026-01-31))"
+```
+
+### One output directory per export
+
+`Save-ExportState` writes `export-state.json` into `output.dir`. Two configs pointing at
+the same `output.dir` means the second fired export **overwrites the first's state file**
+— the first export can no longer be `-Resume`d or downloaded by the engine (only from the
+portal, and only for 14 days). Give every export its own directory, even when the configs
+share a case.
 
 ## Step 2 — Estimate (scope gate, non-destructive)
 
@@ -80,6 +145,40 @@ Proceed with the export? (yes/no)
 
 **Never proceed without explicit confirmation.** If items = 0, stop and investigate — do
 not pass `-Force` to bypass a zero result unless the user insists.
+
+## Step 2a — Breadth triage (choose the query before exporting)
+
+Estimates are non-destructive and repeatable, and `Get-OrCreate-Case` matches an existing
+case by `displayName` — data sources are added at the **case** level, so several configs
+sharing one case name reuse the same case and the same mailbox bindings (the engine
+reports `0 added, N already present`). That makes A/B-ing a query's breadth cheap.
+
+Use it whenever the request could reasonably be read narrow or broad.
+
+1. Build 2-4 configs sharing `case.name` and `mailboxes`, differing **only** in
+   `search.name` and the query.
+2. Run each with `-EstimateOnly`.
+3. Compare **item count** *and* **mailboxes bound** across variants.
+4. Present the comparison, then export **exactly one**.
+
+Reading the numbers:
+
+| Signal | Meaning | Action |
+|--------|---------|--------|
+| Adding a filter barely moves the item count | Weak discriminator — buys little, still able to exclude the target message | Reject it; keep the broader query |
+| A variant hits **fewer mailboxes** than the broad case | Suspect — the query is silently dropping a mailbox or a domain (usually an unexpanded address) | Investigate before trusting it |
+| Big count drop, mailbox coverage held | Real narrowing | Export candidate |
+
+Worked example — keyword + attachment + one month, across two mailboxes:
+
+| Variant | Items | Mailboxes hit | Verdict |
+|---------|-------|---------------|---------|
+| keyword + `hasattachment:true` + month | 276 | 2 of 2 | Baseline |
+| ...plus a three-person recipient filter | 231 | 2 of 2 | **Rejected** — cut only ~16% while risking exclusion of the target thread |
+| ...plus a second required keyword (`AND`) | 179 | **1 of 2** | **Rejected** — silently dropped a mailbox |
+
+The 276-item baseline was exported. A ~16% reduction does not justify exclusion risk in a
+legal collection.
 
 ## Step 3 — Fire the export (async) + poll for the download
 
