@@ -34,6 +34,19 @@ Works for **shared mailboxes** because it uses the correct Purview model — mai
 added as **case noncustodial data sources** scoped by `allCaseNoncustodialDataSources`, not
 custodians (custodians silently return 0 items for shared mailboxes). Validated end-to-end.
 
+Two things the skill does before it estimates, because both are common sources of a clean
+but **wrong** "no results":
+
+- **Identity resolution.** Requests arrive with *names*, not SMTP addresses. Each person is
+  resolved against the directory and expanded across **every** domain their account holds —
+  searching one domain when someone is dual-homed returns a confident false negative. It
+  also checks whether the same human exists a second time as an external contact or guest.
+- **Breadth triage.** Several searches can share one case and reuse its mailbox bindings, so
+  candidate queries can be A/B'd by estimate before anything is exported. Compare item count
+  *and* mailboxes bound: a filter that barely moves the count is a weak discriminator that
+  only adds exclusion risk, and a variant hitting fewer mailboxes is usually dropping one
+  silently rather than legitimately narrowing.
+
 ## Requirements
 
 - PowerShell 7+ and the `Microsoft.Graph.Authentication` module.
@@ -66,9 +79,22 @@ Runs are idempotent — re-running reuses the case, search, and data sources.
 ## Config
 
 See [`config/ediscovery-export.example.json`](config/ediscovery-export.example.json)
-(inline `$comment` fields). Highlights: `search.keywords` (each element an OR'd KQL group;
-set `search.contentQuery` for raw KQL), `export.singlePst` (single combined vs per-mailbox),
-`members` (UPNs to grant portal access), `auth` (app-only cert).
+(inline `$comment` fields). Highlights: `search.keywords` (each element an OR'd KQL group),
+`export.singlePst` (single combined vs per-mailbox), `members` (UPNs to grant portal
+access), `auth` (app-only cert).
+
+> **`search.contentQuery` replaces the whole query — dates included.** Supplying raw KQL
+> bypasses the date builder entirely, so a query with only a `received>=` clause silently
+> drops **Sent Items** — exactly where a "sent to X" message lives. Nothing errors; the
+> estimate just comes back smaller. Prefer `keywords` + `startDate`/`endDate`, or carry
+> both halves yourself:
+> `(<terms>) AND ((received>=A AND received<=B) OR (sent>=A AND sent<=B))`
+
+Building a query by hand? The supported KeyQL properties (`participants`, `subject`,
+`hasattachment`, `attachmentnames`, `kind`, `sent`/`received`, …) are tabulated with
+syntax rules in
+**[skills/ediscovery-export/references/api-contract.md](skills/ediscovery-export/references/api-contract.md)**.
+Note there is no `body:` property — body text is reachable only via bare keywords.
 
 ## Layout
 
