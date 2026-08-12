@@ -45,11 +45,40 @@ tenant-wide compliance searches.
 module) is in `docs/authentication-setup.md`. There is no `.env` — auth is entirely the
 config `auth` block.
 
+## Step 0 — Load the tenant profile before the generic example
+
+`config/ediscovery-export.example.json` is a **sanitized public template**. Its `auth`
+block is placeholders, and it encodes none of a tenant's local conventions. Starting from
+it in a tenant that has already run exports means rediscovering those conventions from
+scratch every time.
+
+**Before writing any config, look for a tenant profile in the invoking repo:**
+
+```
+config/ediscovery-*-template.json      # tenant profile / house template
+exports/**/config-*.json               # prior matters — the real idiom reference
+```
+
+If one exists, **it is the base config, not the example**. A tenant profile typically
+carries the live `auth` block, the standing `members` list, the case-naming convention,
+and the `output.dir` layout — all the things that are otherwise guessed. Prior matter
+configs under `exports/` are the best reference for query idiom in that tenant.
+
+If no tenant profile exists, fall back to the example and consider writing a profile
+afterwards so the next run starts from your conventions rather than the placeholders.
+
+> Adopting a profile does **not** relax the gates below. Identity resolution, the estimate
+> gate, and one-output-directory-per-export still apply.
+
 ## Step 1 — Intake and build the config
 
 Collect: **keywords**, the **mailbox list** (SMTP; expand every domain the person holds),
-the **date range**, **export format** (PST default; single combined vs per-mailbox), and
-who should **see the case** in the portal.
+the **date range**, **export format**, and who should **see the case** in the portal.
+
+**Ask for the export format when the request does not state one.** PST is the config
+default, but for a small collection (roughly < 100 items) loose `.msg` files are usually
+more useful than a PST the requester has to mount. Do not let the default stand silently
+on a small result — surface it at the estimate gate.
 
 ### Resolve identities to SMTP addresses
 
@@ -91,6 +120,33 @@ Copy `config/ediscovery-export.example.json` to a working path. Rules:
 - `mailboxes`: dedupe; include shared mailboxes freely.
 - `members`: default to the requesting admin's cloud UPN.
 - `export.singlePst`: `true` = one combined PST; `false` = one PST per mailbox.
+
+### Query recipes
+
+`mailboxes` sets **whose** mail is searched; the query sets **which** messages. Keep the
+two jobs separate — the most common error is trying to express "between A and B" purely
+through the mailbox list.
+
+Each recipe below goes in a single `search.keywords` element, with `startDate`/`endDate`
+set so the engine builds both date halves. Elements of `keywords` are OR'd together, so an
+`AND` **inside** one element is how you require two conditions.
+
+| Ask | `keywords` element | Notes |
+|-----|--------------------|-------|
+| Correspondence between an internal person and an external party | `participants:"jane@vendor.com"` | Scope `mailboxes` to the internal person; the **external** address is the discriminator. `participants` covers From, To, Cc **and** Bcc, so it catches both directions in one clause. |
+| ...restricted to messages carrying attachments | `participants:"jane@vendor.com" AND hasattachment:true` | Also drops the attachment-free replies in those threads — see the denominator check in Step 2a. |
+| Anyone at an external organisation | `participants:"vendor.com"` | Bare domain is legal. Good ceiling check when a named-address query looks too small. |
+| Topic keywords | `"widget recall"` | Quote to force a phrase; unquoted words are AND-ed by the index. |
+| Topic **and** a named party | `("widget recall" OR "recall notice") AND participants:"jane@vendor.com"` | |
+| Internal-only traffic, external noise removed | `"widget recall" AND NOT participants:"vendor.com"` | Useful as a delta against a broader run. |
+
+Two traps worth knowing (full detail in `references/api-contract.md`):
+
+- A recipient property is **expanded through Entra ID** to the user's SMTP, alias, display
+  name and LegacyExchangeDN, so `participants:"jane@vendor.com"` matches more forms than
+  the literal string. That is usually what you want.
+- Because `participants` spans Bcc, a hit does not prove the address was visible on the
+  message. Do not describe results as "sent to X" without checking the message.
 
 ### WARNING — `search.contentQuery` replaces the whole query, dates included
 
@@ -136,9 +192,9 @@ scoped search, and returns the estimate (all idempotent). Report to the user:
 ```
 Estimate complete (no export yet):
 - Case / Search / Query
-- Mailboxes bound: <mailboxCount>
+- Mailboxes: <mailboxCount> with hits, of <N> bound
 - Items: <indexedItemCount>   Size: ~<sizeGB> GB
-- Format: <pst|msg>, <single | per-mailbox>
+- Format: <pst|msg>, <single | per-mailbox>   <- state it; offer msg if the count is small
 
 Proceed with the export? (yes/no)
 ```
@@ -146,19 +202,69 @@ Proceed with the export? (yes/no)
 **Never proceed without explicit confirmation.** If items = 0, stop and investigate — do
 not pass `-Force` to bypass a zero result unless the user insists.
 
-## Step 2a — Breadth triage (choose the query before exporting)
+### Two different mailbox counts — do not confuse them
+
+The run header prints `Mailboxes: N` (**bound** to the case as data sources). The estimate
+prints `mailboxes=M` (**how many of them had hits**). `M < N` is normal and expected — it
+just means some custodians never touched the topic.
+
+`M < N` is only a red flag **when comparing two variants of the same query**: if the
+broader variant hit 2 mailboxes and the narrower hit 1, the narrower one may be dropping a
+domain rather than legitimately narrowing. In isolation, a low `M` is information, not a
+fault.
+
+## Step 2a — Breadth triage (only when the request is ambiguous, or the estimate looks wrong)
+
+**Triage is a diagnostic tool, not a mandatory stage.** Most tickets do not need it, and
+running three variants on a precisely-worded request wastes time and buries the answer the
+requester actually asked for.
+
+### Decide first: one search, or variants?
+
+**Run the single requested search** when the ticket is *transcribable* — you can write the
+query directly from its words with no guessing:
+
+- named parties on both sides (or a named party plus a named mailbox), **and**
+- an explicit date range, **and**
+- an explicit content filter (attachments, a quoted phrase, a document number) or no
+  content filter wanted at all.
+
+> "Emails between Bailey and breana.hall@vendor.com, 09/01/23–12/01/23, with attachments"
+> is transcribable. Build it, estimate it, confirm it, export it. Do not generate variants.
+
+**Run breadth triage** when any of these hold:
+
+- the subject is described in prose ("anything about the transformer issue") and the
+  keywords are your guesses rather than the requester's words;
+- the party list is partial ("Bailey and a few people at the vendor");
+- competing readings would produce materially different deliverables;
+- **or the first estimate came back suspicious** — 0 items, an implausibly large count, or
+  coverage that dropped a mailbox you expected to hit.
+
+That last case is the most valuable one: triage earns its keep as a *reaction to a bad
+estimate*, not as a ritual before a good one.
+
+### Optional: the denominator check
+
+Even in single-search mode, when the requested query includes a narrowing filter
+(`hasattachment:true`, an extra keyword), **one** extra estimate without that filter is
+often worth running. It costs one non-destructive call and tells the requester what the
+filter excluded — "38 of the 44 messages carry attachments; the other 6 are replies in the
+same threads." That is a sentence they can act on.
+
+This is one extra estimate, not a variant set. Do not export it unless asked.
+
+### Running a variant set
 
 Estimates are non-destructive and repeatable, and `Get-OrCreate-Case` matches an existing
 case by `displayName` — data sources are added at the **case** level, so several configs
 sharing one case name reuse the same case and the same mailbox bindings (the engine
 reports `0 added, N already present`). That makes A/B-ing a query's breadth cheap.
 
-Use it whenever the request could reasonably be read narrow or broad.
-
 1. Build 2-4 configs sharing `case.name` and `mailboxes`, differing **only** in
    `search.name` and the query.
 2. Run each with `-EstimateOnly`.
-3. Compare **item count** *and* **mailboxes bound** across variants.
+3. Compare **item count** *and* **mailboxes with hits** across variants.
 4. Present the comparison, then export **exactly one**.
 
 Reading the numbers:
@@ -204,10 +310,22 @@ pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Invoke-EDiscoveryExport.ps1" \
 - When `succeeded`, `-Resume` downloads the PST + report to `output.dir`, verifies the
   Summary item count, writes the run manifest, and marks the state done.
 
-**Preferred: automate the poll with the Claude Code `/loop` skill** — e.g. run
-`/loop 15m` executing the `-Resume` command, and stop the loop once the run manifest /
-downloaded files appear. Outside Claude Code, a Windows Scheduled Task running the
-`-Resume` command every 15 min is the equivalent (see `docs/runbook.md`).
+**Preferred: run the shipped watcher in the background** — it polls `-Resume` on an
+interval and exits as soon as the package lands, so nothing has to babysit it:
+
+```
+pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Watch-EDiscoveryExport.ps1" \
+  -ConfigFile "<config>.json"
+```
+
+Defaults to a 15-minute interval and gives up after ~8 hours (`-IntervalSeconds`,
+`-MaxPolls`). It stops on the on-disk result, so an export you finish from the portal
+also ends the watch. An agent should start this as a **background task** and report when
+it exits — do not hand-roll a polling loop, and do not sit in a foreground wait.
+
+`/loop 15m` running the `-Resume` command works too, but `/loop` is user-invoked — an
+agent cannot start one for itself. Outside Claude Code, a Windows Scheduled Task running
+`-Resume` every 15 min is the equivalent (see `docs/runbook.md`).
 
 When files land, report: `exportStatus`, each file name + size, `verifiedItemCount`, the
 output directory, and the portal URL. Download URLs are valid 14 days.
@@ -216,7 +334,7 @@ output directory, and the portal URL. Download URLs are valid 14 days.
 
 | Flag | When to pass |
 |------|--------------|
-| `-EstimateOnly` | Step 2. Builds everything, stops before export. |
+| `-EstimateOnly` | Step 2. Builds everything, stops before export. Also the denominator check and any triage variant. |
 | `-Force`        | Step 3 fire, after the user confirms scope. Skips the prompt; fires async. |
 | `-Resume`       | Step 3 poll. Checks the fired export; downloads when ready. |
 | `-Wait`         | Optional: block until the export finishes and download inline (only for small/known-fast exports). |
@@ -237,7 +355,9 @@ output directory, and the portal URL. Download URLs are valid 14 days.
 ## Related files
 
 - Engine: `scripts/Invoke-EDiscoveryExport.ps1`
+- Download watcher: `scripts/Watch-EDiscoveryExport.ps1`
 - Helpers: `scripts/_lib/EDiscovery.psm1`
-- Config template: `config/ediscovery-export.example.json`
+- Config template: `config/ediscovery-export.example.json` (see Step 0 — prefer a tenant
+  profile if the repo has one)
 - API contract (validated request bodies): `references/api-contract.md`
 - Runbook: `docs/runbook.md`

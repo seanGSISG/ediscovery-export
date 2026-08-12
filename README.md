@@ -27,8 +27,9 @@ requests. It shells out to the bundled PowerShell engine.
    match — *before* anything is exported.
 2. **Export (async)** — fires the export and returns immediately with an operation id, a
    state file, and the Purview portal URL. Exports take 30 min to hours, so it never blocks.
-3. **Download** — a `-Resume` check (poll it with `/loop 15m`) downloads the PST + report
-   when the export finishes, verifies the item count, and writes a run manifest.
+3. **Download** — a `-Resume` check (run `Watch-EDiscoveryExport.ps1` to poll it for you)
+   downloads the PST + report when the export finishes, verifies the item count, and writes
+   a run manifest.
 
 Works for **shared mailboxes** because it uses the correct Purview model — mailboxes are
 added as **case noncustodial data sources** scoped by `allCaseNoncustodialDataSources`, not
@@ -41,11 +42,12 @@ but **wrong** "no results":
   resolved against the directory and expanded across **every** domain their account holds —
   searching one domain when someone is dual-homed returns a confident false negative. It
   also checks whether the same human exists a second time as an external contact or guest.
-- **Breadth triage.** Several searches can share one case and reuse its mailbox bindings, so
-  candidate queries can be A/B'd by estimate before anything is exported. Compare item count
-  *and* mailboxes bound: a filter that barely moves the count is a weak discriminator that
-  only adds exclusion risk, and a variant hitting fewer mailboxes is usually dropping one
-  silently rather than legitimately narrowing.
+- **Breadth triage — when the request is ambiguous.** Several searches can share one case and
+  reuse its mailbox bindings, so candidate queries can be A/B'd by estimate before anything is
+  exported. Compare item count *and* mailboxes with hits: a filter that barely moves the count
+  is a weak discriminator that only adds exclusion risk, and a variant hitting fewer mailboxes
+  is usually dropping one silently rather than legitimately narrowing. When a ticket states the
+  parties, dates and filter outright, the skill skips triage and runs exactly that search.
 
 ## Requirements
 
@@ -69,7 +71,10 @@ pwsh -File ./scripts/Invoke-EDiscoveryExport.ps1 -ConfigFile ./config/my-pull.js
 # 3. fire the export (async — returns an op id + portal URL)
 pwsh -File ./scripts/Invoke-EDiscoveryExport.ps1 -ConfigFile ./config/my-pull.json -Force
 
-# 4. poll until the PST lands (schedule this every ~15 min)
+# 4. poll until the PST lands — the watcher does this for you and exits when it arrives
+pwsh -File ./scripts/Watch-EDiscoveryExport.ps1 -ConfigFile ./config/my-pull.json
+
+# ...or check once by hand
 pwsh -File ./scripts/Invoke-EDiscoveryExport.ps1 -ConfigFile ./config/my-pull.json -Resume
 ```
 

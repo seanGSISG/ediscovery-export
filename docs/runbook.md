@@ -62,6 +62,14 @@ writes `run-manifest-*.json`, and renames the state to `export-state.done.json`.
 
 ### Scheduling the poll (check every ~15 min)
 
+- **The shipped watcher** (simplest, and what an agent should use): polls `-Resume` on an
+  interval and exits as soon as the package lands.
+  ```powershell
+  pwsh -File ./scripts/Watch-EDiscoveryExport.ps1 -ConfigFile ./config/<name>.json
+  ```
+  Defaults: 15-minute interval, ~8-hour ceiling (`-IntervalSeconds`, `-MaxPolls`). Exit 0 =
+  package landed, 1 = gave up, 2 = bad input. It stops on the on-disk result, so finishing
+  the download from the portal also ends the watch. Run it as a background job.
 - **Windows Task Scheduler** (unattended): register a task that runs the `-Resume` command
   every 15 minutes. It is a no-op while running and self-completes on success; disable the
   task once `export-state.done.json` appears.
@@ -72,8 +80,8 @@ writes `run-manifest-*.json`, and renames the state to `export-state.done.json`.
     -RepetitionInterval (New-TimeSpan -Minutes 15)
   Register-ScheduledTask -TaskName 'ediscovery-export-resume' -Action $act -Trigger $trg
   ```
-- **Claude Code**: use the `/loop 15m` skill (or a scheduled routine) to re-run the
-  `-Resume` command, and stop it once the run manifest / downloaded files appear.
+- **Claude Code**: `/loop 15m` re-running the `-Resume` command also works, but `/loop` is
+  user-invoked — an agent cannot start one for itself, so prefer the watcher above.
 - **Small/known-fast exports**: skip the async dance — pass `-Wait` instead of `-Force` to
   block until done and download inline.
 
