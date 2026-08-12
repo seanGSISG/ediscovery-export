@@ -15,10 +15,13 @@ Operational steps for a keyword -> PST pull. For the API details see
 
 ## 1. Author the config
 
-Copy `config/ediscovery-export.example.json`, then set:
+Copy `config/ediscovery-export.example.json` — or, if this tenant keeps a profile, extend
+it (see `extends` below) — then set:
 
 | Field | Notes |
 |-------|-------|
+| `extends` | *Optional.* Path to a tenant profile to inherit from, resolved relative to this file. Objects deep-merge (override just `auth.certThumbprint` if you like); arrays and scalars are replaced. Chains allowed, cycles throw. Only the merged config is validated, so a profile need not be complete on its own. |
+| `matter.ticket` | *Optional.* Provenance, e.g. `Zammad #6808`. Printed in the run header and written into every run manifest. |
 | `case.name` / `description` | Human-readable case title. Reused if it already exists. |
 | `search.keywords` | Array; each element is an OR'd KQL group. Or set `search.contentQuery` for raw KQL. |
 | `search.startDate` / `endDate` | `yyyy-MM-dd`. Builds `(received/sent within range)`. Ignored if `contentQuery` set. |

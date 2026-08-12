@@ -388,7 +388,14 @@ try {
     $outDir = $cfg.output.dir
     if (-not [IO.Path]::IsPathRooted($outDir)) { $outDir = Join-Path $projectRoot $outDir }
 
+    # Optional provenance, carried into every run manifest so a package can be traced back
+    # to the request that justified collecting it.
+    $ticket = if ($cfg.PSObject.Properties.Name -contains 'matter') { $cfg.matter.ticket } else { $null }
+
     Write-Host "Case:      $($cfg.case.name)"
+    if ($cfg.PSObject.Properties.Name -contains 'matter' -and $cfg.matter.ticket) {
+        Write-Host "Ticket:    $($cfg.matter.ticket)"
+    }
     Write-Host "Search:    $($cfg.search.name)"
     Write-Host "Query:     $contentQuery"
     Write-Host "Mailboxes: $(@($cfg.mailboxes).Count)"
@@ -418,7 +425,7 @@ try {
         $done = Join-Path $outDir 'export-state.done.json'
         Move-Item -Force (Join-Path $outDir 'export-state.json') $done -ErrorAction SilentlyContinue
         $mf = New-EDRunManifest -OutputDir $outDir -Data @{
-            phase='resume-download'; caseId=$st.caseId; searchId=$st.searchId
+            phase='resume-download'; ticket=$ticket; caseId=$st.caseId; searchId=$st.searchId
             exportOperationId=$st.exportOperationId; exportStatus=$op.status
             files=@($res.saved); verifiedItemCount=$res.verified; portalUrl=$purl
         }
@@ -444,7 +451,10 @@ try {
     $est = Invoke-Estimate -CaseId $case.id -SearchId $search.id
     $items = $est.indexedItemCount; $mbx = $est.mailboxCount
     $sizeGB = if ($est.PSObject.Properties.Name -contains 'indexedItemsSize') { [math]::Round($est.indexedItemsSize/1GB,2) } else { 0 }
-    Write-EDStatus -Type Info -Message "Estimate: status=$($est.status)  mailboxes=$mbx  items=$items  size=${sizeGB}GB"
+    # "$mbx of $mbxCount bound": mailboxes WITH HITS vs mailboxes attached to the case.
+    # Reporting a bare "mailboxes=1" reads as though binding failed. Fewer hits than bound
+    # is normal - it only warrants suspicion when comparing variants of the same query.
+    Write-EDStatus -Type Info -Message "Estimate: status=$($est.status)  mailboxes=$mbx of $mbxCount bound  items=$items  size=${sizeGB}GB"
 
     if ($items -eq 0 -and -not $Force) {
         throw "Estimate returned 0 items. Refusing to export an empty result. Re-run with -Force to override, or check the query/mailboxes."
@@ -453,7 +463,7 @@ try {
     if ($EstimateOnly) {
         Write-EDStatus -Type Success -Message "EstimateOnly: stopping before export. Case=$($case.id) Search=$($search.id)"
         $mf = New-EDRunManifest -OutputDir $outDir -Data @{
-            phase='estimate'; caseId=$case.id; searchId=$search.id; contentQuery=$contentQuery
+            phase='estimate'; ticket=$ticket; caseId=$case.id; searchId=$search.id; contentQuery=$contentQuery
             mailboxesRequested=$mbxCount; estimate=@{ mailboxes=$mbx; items=$items; sizeGB=$sizeGB }
         }
         Write-Host "Run manifest: $mf"
@@ -487,7 +497,7 @@ try {
         $res = Complete-Download -Cfg $cfg -OutDir $outDir -CaseId $case.id -Op $op -Cert $cert
         Move-Item -Force $statePath (Join-Path $outDir 'export-state.done.json') -ErrorAction SilentlyContinue
         $mf = New-EDRunManifest -OutputDir $outDir -Data @{
-            phase='export'; caseId=$case.id; searchId=$search.id; contentQuery=$contentQuery
+            phase='export'; ticket=$ticket; caseId=$case.id; searchId=$search.id; contentQuery=$contentQuery
             exportOperationId=$opId; exportStatus=$op.status
             mailboxesRequested=$mbxCount; estimate=@{ mailboxes=$mbx; items=$items; sizeGB=$sizeGB }
             files=@($res.saved); verifiedItemCount=$res.verified; portalUrl=$purl

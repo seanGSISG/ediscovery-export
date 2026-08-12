@@ -1,6 +1,22 @@
 {
   "$comment": "Copy this file (e.g. to config/my-pull.json, which is gitignored) and fill it in, then pass it to Invoke-EDiscoveryExport.ps1 -ConfigFile. See docs/authentication-setup.md for the auth block.",
 
+  "$comment-extends": [
+    "OPTIONAL. Inherit from a tenant profile instead of restating shared settings in every",
+    "matter: \"extends\": \"../ediscovery-tenant-profile.json\". The path is resolved relative to",
+    "THIS file. Objects deep-merge (so auth can override just certThumbprint) while arrays and",
+    "scalars are replaced wholesale. Chains are allowed; cycles throw. A profile need not be a",
+    "complete run config - only the merged result is validated.",
+    "Recommended for any tenant that runs more than one matter: put auth + members + conventions",
+    "in the profile, and keep case/search/mailboxes/output per matter. Cert rotation then touches",
+    "one file instead of every matter config ever written."
+  ],
+
+  "matter": {
+    "ticket": null,
+    "$comment": "OPTIONAL provenance, e.g. 'Zammad #6808' or 'Matter-1234'. Printed in the run header and written into every run manifest, so an exported package can be traced back to the request that justified it."
+  },
+
   "case": {
     "name": "Matter-1234 - Keyword Collection",
     "description": "Keyword pull for <matter/claim>, <date range>, <who>."

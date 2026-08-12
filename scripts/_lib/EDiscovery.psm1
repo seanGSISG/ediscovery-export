@@ -54,23 +54,85 @@ function Write-EDStatus {
 # Configuration
 # ============================================================================
 
+function Merge-EDConfigObject {
+    <#
+    .SYNOPSIS
+        Deep-merge an override config object over a base. Returns a new object.
+    .DESCRIPTION
+        Nested objects merge key-by-key so an override can change one field of a section
+        (e.g. auth.certThumbprint) without restating the section. Arrays and scalars are
+        REPLACED wholesale, never concatenated - a matter that lists two mailboxes means
+        those two, not those two appended to whatever the profile listed.
+    #>
+    [OutputType([PSCustomObject])]
+    param(
+        [PSCustomObject]$Base,
+        [PSCustomObject]$Override
+    )
+    if ($null -eq $Base)     { return $Override }
+    if ($null -eq $Override) { return $Base }
+
+    $out = [ordered]@{}
+    foreach ($p in $Base.PSObject.Properties)     { $out[$p.Name] = $p.Value }
+    foreach ($p in $Override.PSObject.Properties) {
+        $isMergeable = $out.Contains($p.Name) -and
+                       $out[$p.Name] -is [PSCustomObject] -and
+                       $p.Value      -is [PSCustomObject]
+        $out[$p.Name] = if ($isMergeable) {
+            Merge-EDConfigObject -Base $out[$p.Name] -Override $p.Value
+        } else {
+            $p.Value
+        }
+    }
+    return [PSCustomObject]$out
+}
+
 function Get-EDConfig {
     <#
     .SYNOPSIS
         Load and validate a run config file. Returns a PSCustomObject.
+    .DESCRIPTION
+        A config may set "extends": "<path>" to inherit from a tenant profile - the shared
+        auth block, standing members, and output conventions - so a per-matter config
+        carries only what is specific to the matter. The path is resolved relative to the
+        config that declares it. Chains are allowed; cycles throw.
     #>
     [CmdletBinding()]
     [OutputType([PSCustomObject])]
     param(
-        [Parameter(Mandatory)][string]$Path
+        [Parameter(Mandatory)][string]$Path,
+        [string[]]$Seen = @(),
+        # Internal: set when loading a base profile, which need not be a complete run
+        # config on its own. Only the merged result is validated.
+        [switch]$SkipValidation
     )
 
     if (-not (Test-Path $Path)) { throw "Config file not found: $Path" }
+    $full = (Resolve-Path $Path).Path
+    if ($Seen -contains $full) {
+        throw "Circular 'extends' chain in config: $($Seen + $full -join ' -> ')"
+    }
     try {
         $cfg = Get-Content -Path $Path -Raw | ConvertFrom-Json
     } catch {
         throw "Config is not valid JSON ($Path): $_"
     }
+
+    # ---- inheritance: load the base first, then layer this file over it ----
+    if ($cfg.PSObject.Properties.Name.Contains('extends') -and $cfg.extends) {
+        $basePath = $cfg.extends
+        if (-not [IO.Path]::IsPathRooted($basePath)) {
+            $basePath = Join-Path (Split-Path -Parent $full) $basePath
+        }
+        if (-not (Test-Path $basePath)) {
+            throw "Config '$Path' extends '$($cfg.extends)', which was not found at: $basePath"
+        }
+        # -SkipValidation: only the fully merged config has to be complete. A tenant
+        # profile legitimately has no case/search/mailboxes of its own.
+        $base = Get-EDConfig -Path $basePath -Seen ($Seen + $full) -SkipValidation
+        $cfg  = Merge-EDConfigObject -Base $base -Override $cfg
+    }
+    if ($SkipValidation) { return $cfg }
 
     # ---- required sections ----
     foreach ($k in 'case','search','mailboxes','export','output','auth') {
