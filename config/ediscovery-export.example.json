@@ -47,7 +47,8 @@
     "location": "responsiveLocations",
     "includeReport": true,
     "includePartiallyIndexed": false,
-    "$comment": "singlePst:false adds 'splitSource' for one PST per mailbox. format: pst or msg."
+    "friendlyNames": null,
+    "$comment": "singlePst:false adds 'splitSource' for one PST per mailbox. format: pst or msg. friendlyNames adds the 'friendlyName' option: for msg it names each file after the email subject instead of a GUID, and it does nothing for pst (subjects are kept inside the PST either way). Leave null to default it ON for msg and off for pst; set false only to deliberately keep GUID names."
   },
 
   "output": {

@@ -80,6 +80,23 @@ default, but for a small collection (roughly < 100 items) loose `.msg` files are
 more useful than a PST the requester has to mount. Do not let the default stand silently
 on a small result — surface it at the estimate gate.
 
+### MSG exports must use friendly names
+
+Purview names exported `.msg` files by **GUID** unless the `friendlyName` export option is
+set — `c5e1aeb0d5e24a92.msg` rather than `RE Safari Electric invoice.msg`. A GUID-named
+package is unusable to a requester without cross-referencing `Items.csv` in the report zip,
+which is not a deliverable anyone wants to receive.
+
+The engine therefore defaults `export.friendlyNames` **on for `msg`** and off for `pst`
+(PST keeps subjects inside the file regardless, and Microsoft documents the option as
+having no effect there). Leave it `null` unless you have a reason. Set it to `false` only
+when GUID names are wanted deliberately — e.g. a downstream tool keys on them, or subjects
+would collide.
+
+If a `.msg` package has already been produced with GUID names, re-exporting with the option
+set is cheap: the case and search already exist, so only the export operation re-runs.
+Send it to a **new** `output.dir` — never reuse the first export's directory.
+
 ### Resolve identities to SMTP addresses
 
 Tickets arrive with **names**, not addresses. Resolve every participant against the tenant

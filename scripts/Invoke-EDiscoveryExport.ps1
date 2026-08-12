@@ -248,15 +248,27 @@ function Start-Export {
         Does NOT block -- exports can take 30 min to hours.
     #>
     param([string]$CaseId,[string]$SearchId,[PSCustomObject]$Export)
-    $opts = @()
-    if ($Export.includeReport) { $opts += 'includeReport' }
-    if (-not $Export.singlePst) { $opts += 'splitSource' }
-    if ($opts.Count -eq 0) { $opts += 'none' }
-
     $criteria = if ($Export.PSObject.Properties.Name -contains 'criteria' -and $Export.criteria) { $Export.criteria } else { 'searchHits' }
     if ($Export.includePartiallyIndexed -and $criteria -notmatch 'partiallyIndexed') { $criteria = "$criteria, partiallyIndexed" }
     $location = if ($Export.PSObject.Properties.Name -contains 'location' -and $Export.location) { $Export.location } else { 'responsiveLocations' }
     $format   = if ($Export.PSObject.Properties.Name -contains 'format'   -and $Export.format)   { $Export.format }   else { 'pst' }
+
+    # friendlyName controls item naming. For msg exports it is the difference between
+    # <subject>.msg and <guid>.msg - a GUID-named package is unusable to the requester
+    # without cross-referencing Items.csv, so it defaults ON for msg. It has no effect on
+    # pst (messages keep their subjects inside the PST regardless). Set
+    # export.friendlyNames = false to opt out deliberately.
+    $friendly = if ($Export.PSObject.Properties.Name -contains 'friendlyNames' -and $null -ne $Export.friendlyNames) {
+        [bool]$Export.friendlyNames
+    } else {
+        $format -eq 'msg'
+    }
+
+    $opts = @()
+    if ($Export.includeReport) { $opts += 'includeReport' }
+    if (-not $Export.singlePst) { $opts += 'splitSource' }
+    if ($friendly)             { $opts += 'friendlyName' }
+    if ($opts.Count -eq 0) { $opts += 'none' }
 
     $body = @{
         displayName       = "Export $(Get-Date -f 'yyyy-MM-dd HHmm')"
