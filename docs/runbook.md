@@ -20,7 +20,7 @@ it (see `extends` below) — then set:
 
 | Field | Notes |
 |-------|-------|
-| `extends` | *Optional.* Path to a tenant profile to inherit from, resolved relative to this file. Objects deep-merge (override just `auth.certThumbprint` if you like); arrays and scalars are replaced. Chains allowed, cycles throw. Only the merged config is validated, so a profile need not be complete on its own. |
+| `extends` | *Optional.* Inherit from a tenant profile. Write `"tenant-profile"` to resolve portably (`$env:EDISCOVERY_TENANT_PROFILE` → `config/ediscovery-tenant-profile.json` in any parent dir → `~/.claude/ediscovery/tenant-profile.json`), or a literal path (relative to this file, `%VARS%`/`${VARS}` expanded) to pin one. Objects deep-merge (override just `auth.certThumbprint` if you like); arrays and scalars are replaced. Chains allowed, cycles throw. Only the merged config is validated. Create a profile with `scripts/New-EDTenantProfile.ps1`. |
 | `matter.ticket` | *Optional.* Provenance, e.g. `Zammad #6808`. Printed in the run header and written into every run manifest. |
 | `case.name` / `description` | Human-readable case title. Reused if it already exists. |
 | `search.keywords` | Array; each element is an OR'd KQL group. Or set `search.contentQuery` for raw KQL. |

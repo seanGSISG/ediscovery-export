@@ -45,27 +45,60 @@ tenant-wide compliance searches.
 module) is in `docs/authentication-setup.md`. There is no `.env` — auth is entirely the
 config `auth` block.
 
-## Step 0 — Load the tenant profile before the generic example
+## Step 0 — Find or create the tenant profile
 
-`config/ediscovery-export.example.json` is a **sanitized public template**. Its `auth`
-block is placeholders, and it encodes none of a tenant's local conventions. Starting from
-it in a tenant that has already run exports means rediscovering those conventions from
-scratch every time.
+`config/ediscovery-export.example.json` is a **sanitized public template**: placeholder
+`auth`, no local conventions. Never start a real matter from it if a tenant profile exists,
+and never hand-write an `auth` block from memory.
 
-**Before writing any config, look for a tenant profile in the invoking repo:**
+A **tenant profile** holds what is the same for every matter in one tenant — the app-only
+auth block, the standing `members`, and the house export defaults — so a matter config
+carries only `case` / `search` / `mailboxes` / `output`, and a certificate rotation touches
+one file instead of every config ever written.
+
+### Does one already exist?
+
+Resolution order (`Resolve-EDTenantProfilePath`), first hit wins:
+
+1. `$env:EDISCOVERY_TENANT_PROFILE` — the per-admin override
+2. `config/ediscovery-tenant-profile.json` in the config's directory or **any parent** —
+   the repo-level profile, for a team sharing a repo
+3. `~/.claude/ediscovery/tenant-profile.json` — the per-user default, needs no repo
+
+Also read `exports/**/config-*.json` if present: prior matters are the best reference for
+that tenant's query idiom and naming.
+
+### If none exists, generate it — do not hand-write it
 
 ```
-config/ediscovery-*-template.json      # tenant profile / house template
-exports/**/config-*.json               # prior matters — the real idiom reference
+pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/New-EDTenantProfile.ps1"
 ```
 
-If one exists, **it is the base config, not the example**. A tenant profile typically
-carries the live `auth` block, the standing `members` list, the case-naming convention,
-and the `output.dir` layout — all the things that are otherwise guessed. Prior matter
-configs under `exports/` are the best reference for query idiom in that tenant.
+Prompts for app id, tenant id, certificate thumbprint and case members; **resolves the
+certificate, acquires a real app-only token, and verifies that a matter config extending
+the profile merges to a complete run config** before it reports success. A profile that
+does not authenticate is worse than none, so this fails at setup rather than mid-collection.
 
-If no tenant profile exists, fall back to the example and consider writing a profile
-afterwards so the next run starts from your conventions rather than the placeholders.
+Defaults to the per-user path, which is the right choice when admins do not share a folder
+layout. Pass `-Path ./config/ediscovery-tenant-profile.json` for a repo-level profile a
+team version-controls together.
+
+### Reference it portably
+
+In the matter config write the **sentinel**, not a machine-specific path:
+
+```json
+"extends": "tenant-profile"
+```
+
+It resolves through the order above, so the same matter config works on any admin's
+machine. A literal relative or absolute path also works (with `%VARS%` / `${VARS}`
+expanded) when you deliberately want to pin one file.
+
+> A tenant profile is **not** a secret store — app id, tenant id and a certificate
+> thumbprint, no private key or client secret. It is still tenant-identifying: keep it out
+> of any repository you publish or share as a plugin marketplace. Each tenant generates its
+> own.
 
 > Adopting a profile does **not** relax the gates below. Identity resolution, the estimate
 > gate, and one-output-directory-per-export still apply.
@@ -372,6 +405,7 @@ output directory, and the portal URL. Download URLs are valid 14 days.
 ## Related files
 
 - Engine: `scripts/Invoke-EDiscoveryExport.ps1`
+- Tenant profile generator: `scripts/New-EDTenantProfile.ps1`
 - Download watcher: `scripts/Watch-EDiscoveryExport.ps1`
 - Helpers: `scripts/_lib/EDiscovery.psm1`
 - Config template: `config/ediscovery-export.example.json` (see Step 0 — prefer a tenant

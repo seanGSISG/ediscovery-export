@@ -54,6 +54,65 @@ function Write-EDStatus {
 # Configuration
 # ============================================================================
 
+function Resolve-EDTenantProfilePath {
+    <#
+    .SYNOPSIS
+        Resolve an 'extends' value to a tenant profile on disk. Returns $null if not found.
+    .DESCRIPTION
+        Matter configs have to stay portable between admins who do not share a repo layout,
+        so 'extends' is resolved through a search order rather than a single hard path:
+
+          1. The literal value, with %VARS% and ${VARS} expanded, relative to the config
+             that declared it (or absolute).
+          2. $env:EDISCOVERY_TENANT_PROFILE - the per-admin override. Set this once and
+             matter configs can say "extends": "tenant-profile" and work on any machine.
+          3. config/ediscovery-tenant-profile.json in the declaring file's directory or any
+             parent - the repo-level profile, for a team sharing one repo.
+          4. ~/.claude/ediscovery/tenant-profile.json - the per-user default, which needs no
+             repo at all.
+
+        The sentinel value "tenant-profile" means "skip step 1, just search" - that is the
+        portable form to write in a shared template.
+    #>
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$Extends,
+        [Parameter(Mandatory)][string]$DeclaringFile
+    )
+
+    $declDir = Split-Path -Parent $DeclaringFile
+
+    if ($Extends -ne 'tenant-profile') {
+        $lit = [Environment]::ExpandEnvironmentVariables($Extends)
+        # Also honour ${VAR}, which is the form a non-Windows admin will reach for.
+        $lit = [regex]::Replace($lit, '\$\{(\w+)\}', {
+            param($m) [Environment]::GetEnvironmentVariable($m.Groups[1].Value)
+        })
+        if ($lit) {
+            $p = if ([IO.Path]::IsPathRooted($lit)) { $lit } else { Join-Path $declDir $lit }
+            if (Test-Path $p) { return (Resolve-Path $p).Path }
+        }
+    }
+
+    if ($env:EDISCOVERY_TENANT_PROFILE -and (Test-Path $env:EDISCOVERY_TENANT_PROFILE)) {
+        return (Resolve-Path $env:EDISCOVERY_TENANT_PROFILE).Path
+    }
+
+    $dir = $declDir
+    while ($dir) {
+        $candidate = Join-Path $dir 'config/ediscovery-tenant-profile.json'
+        if (Test-Path $candidate) { return (Resolve-Path $candidate).Path }
+        $parent = Split-Path -Parent $dir
+        if ($parent -eq $dir) { break }
+        $dir = $parent
+    }
+
+    $userLevel = Join-Path $HOME '.claude/ediscovery/tenant-profile.json'
+    if (Test-Path $userLevel) { return (Resolve-Path $userLevel).Path }
+
+    return $null
+}
+
 function Merge-EDConfigObject {
     <#
     .SYNOPSIS
@@ -120,12 +179,14 @@ function Get-EDConfig {
 
     # ---- inheritance: load the base first, then layer this file over it ----
     if ($cfg.PSObject.Properties.Name.Contains('extends') -and $cfg.extends) {
-        $basePath = $cfg.extends
-        if (-not [IO.Path]::IsPathRooted($basePath)) {
-            $basePath = Join-Path (Split-Path -Parent $full) $basePath
-        }
-        if (-not (Test-Path $basePath)) {
-            throw "Config '$Path' extends '$($cfg.extends)', which was not found at: $basePath"
+        $basePath = Resolve-EDTenantProfilePath -Extends $cfg.extends -DeclaringFile $full
+        if (-not $basePath) {
+            throw @"
+Config '$Path' extends '$($cfg.extends)', but no tenant profile was found.
+Searched: the literal path, `$env:EDISCOVERY_TENANT_PROFILE, config/ediscovery-tenant-profile.json
+in each parent directory, and ~/.claude/ediscovery/tenant-profile.json.
+Create one with: pwsh -File scripts/New-EDTenantProfile.ps1
+"@
         }
         # -SkipValidation: only the fully merged config has to be complete. A tenant
         # profile legitimately has no case/search/mailboxes of its own.
