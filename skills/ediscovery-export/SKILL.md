@@ -365,12 +365,15 @@ interval and exits as soon as the package lands, so nothing has to babysit it:
 
 ```
 pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Watch-EDiscoveryExport.ps1" \
-  -ConfigFile "<config>.json"
+  -ConfigFile "<config>.json" -NotifyTo sswanson@gsisg.com
 ```
 
 Defaults to a 15-minute interval and gives up after ~8 hours (`-IntervalSeconds`,
 `-MaxPolls`). It stops on the on-disk result, so an export you finish from the portal
-also ends the watch. An agent should start this as a **background task** and report when
+also ends the watch. `-NotifyTo` emails the outcome (landed or gave up) from the
+AgentMail inbox (`-NotifyInbox`, default `lsdmt@agentmail.to`) using
+`AGENTMAIL_API_KEY`; omit it and the watcher sends nothing. Pass it by default when the
+user will not be at the session when the export finishes. An agent should start this as a **background task** and report when
 it exits — do not hand-roll a polling loop, and do not sit in a foreground wait.
 
 `/loop 15m` running the `-Resume` command works too, but `/loop` is user-invoked — an

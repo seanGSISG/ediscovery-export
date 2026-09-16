@@ -31,8 +31,19 @@
     Override the path to Invoke-EDiscoveryExport.ps1. Defaults to the copy alongside this
     script.
 
+.PARAMETER NotifyTo
+    Optional. Email this address when the package lands or the watch gives up, sent from
+    the AgentMail inbox in -NotifyInbox using the AGENTMAIL_API_KEY environment variable.
+    A failed notification is a warning; it never changes the exit code.
+
+.PARAMETER NotifyInbox
+    AgentMail inbox that sends the notification. Default lsdmt@agentmail.to.
+
 .EXAMPLE
     pwsh -File scripts/Watch-EDiscoveryExport.ps1 -ConfigFile exports/matter/config.json
+
+.EXAMPLE
+    pwsh -File scripts/Watch-EDiscoveryExport.ps1 -ConfigFile exports/matter/config.json -NotifyTo sswanson@gsisg.com
 
 .EXAMPLE
     Start-Job { pwsh -File scripts/Watch-EDiscoveryExport.ps1 -ConfigFile $using:cfg }
@@ -51,7 +62,13 @@ param(
     [ValidateRange(1, 500)]
     [int]$MaxPolls = 32,
 
-    [string]$EnginePath
+    [string]$EnginePath,
+
+    [ValidatePattern('^[^@\s]+@[^@\s]+\.[^@\s]+$')]
+    [string]$NotifyTo,
+
+    [ValidateNotNullOrEmpty()]
+    [string]$NotifyInbox = 'lsdmt@agentmail.to'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -93,6 +110,26 @@ function Test-PackageLanded {
         Select-Object -First 1)
 }
 
+# Inline on purpose: the plugin is self-contained. No-op unless -NotifyTo was given.
+function Send-WatchNotification {
+    param([string]$Subject, [string]$Text)
+    if (-not $NotifyTo) { return }
+    $key = $env:AGENTMAIL_API_KEY
+    if (-not $key) { $key = [Environment]::GetEnvironmentVariable('AGENTMAIL_API_KEY', 'User') }
+    if (-not $key) { Write-Warning 'NotifyTo set but AGENTMAIL_API_KEY is missing - no email sent.'; return }
+    try {
+        $null = Invoke-RestMethod -Method Post `
+            -Uri "https://api.agentmail.to/v0/inboxes/$([uri]::EscapeDataString($NotifyInbox))/messages/send" `
+            -Headers @{ Authorization = "Bearer $key" } -ContentType 'application/json' `
+            -Body (@{ to = @($NotifyTo); subject = $Subject; text = $Text } | ConvertTo-Json)
+        Write-Host "Notified $NotifyTo"
+    } catch {
+        Write-Warning "Notification failed (watch result unchanged): $($_.Exception.Message)"
+    }
+}
+
+$matterName = Split-Path -Leaf (Split-Path -Parent (Resolve-Path $ConfigFile))
+
 Write-Host "Watching export for $ConfigFile"
 Write-Host "  Output:   $outDir"
 Write-Host "  Interval: ${IntervalSeconds}s   Max polls: $MaxPolls"
@@ -118,11 +155,13 @@ for ($i = 1; $i -le $MaxPolls; $i++) {
     if (Test-PackageLanded -Dir $outDir) {
         Write-Host ""
         Write-Host "=== PACKAGE LANDED after $i poll(s) ==="
-        Get-ChildItem -Path $outDir -File |
+        $listing = Get-ChildItem -Path $outDir -File |
             Select-Object Name, @{ n = 'MB'; e = { [math]::Round($_.Length / 1MB, 2) } }, LastWriteTime |
             Format-Table -AutoSize |
-            Out-String |
-            Write-Host
+            Out-String
+        Write-Host $listing
+        Send-WatchNotification -Subject "[eDiscovery] $matterName - export downloaded" `
+            -Text "Package landed after $i poll(s).`n`nConfig: $ConfigFile`nOutput: $outDir`n`n$listing"
         exit 0
     }
 
@@ -130,4 +169,6 @@ for ($i = 1; $i -le $MaxPolls; $i++) {
 }
 
 Write-Warning "Gave up after $MaxPolls polls. The export may still be running - check the portal, or re-run this watcher."
+Send-WatchNotification -Subject "[eDiscovery] $matterName - watcher gave up" `
+    -Text "No package after $MaxPolls polls. The export may still be running - check the portal, or re-run the watcher.`n`nConfig: $ConfigFile`nOutput: $outDir"
 exit 1
